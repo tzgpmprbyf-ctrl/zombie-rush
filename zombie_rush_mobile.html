@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Zombie Rush Mobile</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050706;color:#fff;font-family:Arial,sans-serif;touch-action:none}
+body{position:fixed;inset:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+#login,#pause,#gameover{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(2,5,4,.86);z-index:20}
+.panel{width:min(88vw,390px);padding:26px;border:1px solid #59665e;border-radius:20px;background:linear-gradient(145deg,#151b18,#090d0b);box-shadow:0 20px 70px #000;color:#fff;text-align:center}
+h1{margin:0 0 8px;font-size:32px}
+p{color:#b9c5bd}
+input,button{font:inherit}
+input{width:100%;padding:14px;border-radius:12px;border:1px solid #59665e;background:#0b100e;color:white;outline:none}
+button{border:0;border-radius:12px;padding:13px 18px;background:#b6e35a;color:#111;font-weight:900;margin-top:12px}
+#hud{position:fixed;top:10px;left:10px;z-index:5;background:#07100cdd;border:1px solid #536158;border-radius:12px;padding:8px 11px;font-size:13px;line-height:1.45}
+#pauseBtn{position:fixed;right:10px;top:10px;z-index:6;background:#202a25;color:#fff;border:1px solid #65736a;padding:10px 14px;margin:0}
+#controls{position:fixed;inset:0;pointer-events:none;z-index:7}
+.pad{position:absolute;bottom:24px;left:22px;width:150px;height:150px;pointer-events:auto}
+.pad button,.fire{position:absolute;margin:0;background:#26332cdd;color:white;border:1px solid #718075;box-shadow:0 6px 18px #0008}
+.pad button{width:52px;height:52px;border-radius:50%;padding:0;font-size:22px}
+.up{left:49px;top:0}.left{left:0;top:49px}.right{right:0;top:49px}.down{left:49px;bottom:0}
+.fire{right:25px;bottom:40px;width:86px;height:86px;border-radius:50%;background:#9b3028;color:#fff;font-size:16px}
+#pause,#gameover{display:none}
+.small{font-size:12px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">❤️ 100<br>🧟 0<br>🌊 Vlna 1<br>🌍 Mesto po apokalypse</div>
+<button id="pauseBtn">⏸</button>
+
+<div id="controls">
+  <div class="pad">
+    <button class="up" data-key="w">▲</button>
+    <button class="left" data-key="a">◀</button>
+    <button class="right" data-key="d">▶</button>
+    <button class="down" data-key="s">▼</button>
+  </div>
+  <button class="fire" id="fire">🔥<br>STREĽ</button>
+</div>
+
+<div id="login">
+  <div class="panel">
+    <h1>🧟 ZOMBIE RUSH</h1>
+    <p>Mobilná verzia</p>
+    <input id="name" maxlength="16" placeholder="Tvoje meno">
+    <button id="start">SPUSTIŤ HRU</button>
+    <p class="small">Každých 5 vĺn sa zmení svet.</p>
+  </div>
+</div>
+
+<div id="pause"><div class="panel"><h1>⏸ PAUZA</h1><p>Zombíci sú zastavení.</p><button id="resume">POKRAČOVAŤ</button></div></div>
+<div id="gameover"><div class="panel"><h1>☠️ KONIEC</h1><p id="final"></p><button id="again">HRAŤ ZNOVA</button></div></div>
+
+<script>
+"use strict";
+const canvas=document.getElementById("c"),ctx=canvas.getContext("2d");
+let W=innerWidth,H=innerHeight,dpr=1;
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener("resize",resize);resize();
+
+const worlds=[
+["Mesto po apokalypse","#0b110e"],["Zabudnutý cintorín","#070b0a"],["Temný les","#061008"],
+["Zamrznuté mesto","#091117"],["Prašná púšť","#170e07"],["Horiace peklo","#130706"],
+["Opustená nemocnica","#0a0d10"],["Mesto v daždi","#071116"],["Močiare","#06110d"],
+["Havarovaná diaľnica","#100f0c"],["Starý prístav","#071116"],["Podzemné metro","#08090d"],
+["Laboratórium","#090e0c"],["Toxická zóna","#071006"],["Nočný karneval","#100914"],
+["Zničený hrad","#0e0b09"],["Katedrála tmy","#09090d"],["Potopené mesto","#061014"],
+["Vesmírna stanica","#05070d"],["Mesačná kolónia","#090b12"],["Sopečný ostrov","#120a06"],
+["Zabudnutá džungľa","#061009"],["Sklenené mesto","#081015"],["Mrazivá pevnosť","#07101a"],
+["Mŕtve pohorie","#0b0d0b"],["Čierny kaňon","#0b0908"],["Krvavé mesto","#100708"],
+["Mesto z popola","#0e0e0d"],["Zombie labyrint","#080c0b"],["Posledná zóna","#060707"]
+];
+
+let player,zombies,bullets,score,wave,kills,running=false,paused=false,last=0,spawnTimer=0,keys={};
+let touchFire=false;
+
+function reset(){
+ player={x:W/2,y:H/2,hp:100,speed:190,angle:0,fire:0,hit:0};
+ zombies=[];bullets=[];score=0;kills=0;wave=1;spawnTimer=0;paused=false;running=true;
+ document.getElementById("login").style.display="none";
+ document.getElementById("gameover").style.display="none";
+}
+
+function world(){return worlds[Math.floor((wave-1)/5)%worlds.length]}
+
+function spawn(){
+ const side=Math.floor(Math.random()*4),m=35;
+ let x,y;
+ if(side===0){x=-m;y=Math.random()*H}else if(side===1){x=W+m;y=Math.random()*H}
+ else if(side===2){x=Math.random()*W;y=-m}else{x=Math.random()*W;y=H+m}
+ const type=Math.random()<.13?"boom":"normal";
+ zombies.push({x,y,r:type==="boom"?17:14,hp:type==="boom"?2:1,speed:(38+wave*2)*(type==="boom"?.82:1),type});
+}
+
+function shoot(){
+ if(!running||paused||player.fire>0)return;
+ player.fire=.20;
+ const a=player.angle;
+ if((wave>=5)&&Math.random()<.22){
+   for(let i=-2;i<=2;i++) bullets.push({x:player.x,y:player.y,a:a+i*.13,speed:650,life:.8,dmg:1});
+ }else bullets.push({x:player.x,y:player.y,a,speed:700,life:.8,dmg:1});
+}
+
+function update(dt){
+ if(!running||paused)return;
+ player.fire=Math.max(0,player.fire-dt);player.hit=Math.max(0,player.hit-dt);
+ const dx=(keys.d?1:0)-(keys.a?1:0),dy=(keys.s?1:0)-(keys.w?1:0);
+ const len=Math.hypot(dx,dy)||1;
+ player.x=Math.max(18,Math.min(W-18,player.x+dx/len*player.speed*dt));
+ player.y=Math.max(55,Math.min(H-18,player.y+dy/len*player.speed*dt));
+ if(touchFire)shoot();
+
+ const target=zombies[0];
+ if(target)player.angle=Math.atan2(target.y-player.y,target.x-player.x);
+
+ spawnTimer-=dt;
+ const interval=Math.max(.25,1.05-wave*.025);
+ if(spawnTimer<=0){spawn();spawnTimer=interval}
+
+ for(const b of bullets){b.x+=Math.cos(b.a)*b.speed*dt;b.y+=Math.sin(b.a)*b.speed*dt;b.life-=dt}
+ bullets=bullets.filter(b=>b.life>0&&b.x>-40&&b.x<W+40&&b.y>-40&&b.y<H+40);
+
+ for(const z of zombies){
+   const a=Math.atan2(player.y-z.y,player.x-z.x);
+   z.x+=Math.cos(a)*z.speed*dt;z.y+=Math.sin(a)*z.speed*dt;
+   if(Math.hypot(z.x-player.x,z.y-player.y)<z.r+13 && player.hit<=0){
+     player.hp-=z.type==="boom"?18:10;player.hit=.65;
+     if(z.type==="boom")z.hp=0;
+   }
+ }
+ for(const b of bullets)for(const z of zombies){
+   if(z.hp>0&&Math.hypot(b.x-z.x,b.y-z.y)<z.r+5){z.hp-=b.dmg;b.life=0;if(z.hp<=0){kills++;score+=z.type==="boom"?25:10}}
+ }
+ zombies=zombies.filter(z=>z.hp>0);
+ wave=1+Math.floor(kills/15);
+ if(player.hp<=0){running=false;document.getElementById("final").textContent=`${kills} zabitých zombíkov • skóre ${score}`;document.getElementById("gameover").style.display="flex"}
+ updateHud();
+}
+
+function updateHud(){
+ document.getElementById("hud").innerHTML=`❤️ ${Math.max(0,Math.ceil(player.hp))}<br>🧟 ${kills}<br>🏆 ${score}<br>🌊 Vlna ${wave}<br>🌍 ${world()[0]}`;
+}
+
+function drawBackground(){
+ const [name,bg]=world();ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+ // svetelné pásy a veľké stabilné objekty – bez blikajúcich náhodných prvkov
+ ctx.fillStyle="rgba(255,255,255,.025)";
+ for(let i=0;i<8;i++){ctx.fillRect((i*211)%W,70+(i*97)%H,100,2)}
+ if(Math.floor((wave-1)/5)%5===1){
+   ctx.fillStyle="#252c27";
+   for(let i=0;i<8;i++){let x=70+i*105,y=H*.45+(i%2)*55;ctx.fillRect(x,y,16,55);ctx.fillRect(x-5,y+18,26,4)}
+ }
+ if(Math.floor((wave-1)/5)%5===0){
+   ctx.fillStyle="#262a27";
+   [[60,H*.2],[W-80,H*.25],[90,H*.72],[W-100,H*.68]].forEach(([x,y])=>{ctx.fillRect(x,y,55,80);ctx.fillRect(x+10,y-18,35,18)})
+ }
+ if(Math.floor((wave-1)/5)%5===2){
+   ctx.fillStyle="#14251a";
+   for(let i=0;i<10;i++){let x=(i*127)%W,y=100+(i*73)%H;ctx.beginPath();ctx.arc(x,y,28,0,7);ctx.fill()}
+ }
+}
+
+function draw(){
+ drawBackground();
+ for(const b of bullets){ctx.fillStyle="#ffd36a";ctx.beginPath();ctx.arc(b.x,b.y,4,0,7);ctx.fill()}
+ for(const z of zombies){
+   ctx.save();ctx.translate(z.x,z.y);
+   ctx.fillStyle=z.type==="boom"?"#a84935":"#66834d";
+   ctx.beginPath();ctx.arc(0,0,z.r,0,7);ctx.fill();
+   ctx.fillStyle="#20251e";ctx.beginPath();ctx.arc(-5,-3,3,0,7);ctx.arc(5,-3,3,0,7);ctx.fill();
+   ctx.fillStyle="#111";ctx.fillRect(-7,6,14,4);
+   if(z.type==="boom"){ctx.strokeStyle="#ff7b3c";ctx.lineWidth=3;ctx.stroke()}
+   ctx.restore();
+ }
+ // ľudská postava
+ ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.angle);
+ ctx.fillStyle="rgba(0,0,0,.55)";ctx.beginPath();ctx.ellipse(0,20,18,7,0,0,7);ctx.fill();
+ ctx.strokeStyle="#141916";ctx.lineWidth=8;ctx.lineCap="round";ctx.beginPath();ctx.moveTo(-6,11);ctx.lineTo(-9,28);ctx.moveTo(6,11);ctx.lineTo(9,28);ctx.stroke();
+ ctx.fillStyle="#34463c";ctx.beginPath();ctx.roundRect(-14,-11,28,27,7);ctx.fill();
+ ctx.fillStyle="#ad7b61";ctx.fillRect(-5,-18,10,7);ctx.beginPath();ctx.arc(0,-27,12,0,7);ctx.fill();
+ ctx.fillStyle="#20201c";ctx.beginPath();ctx.arc(0,-34,12,0,7);ctx.fill();
+ ctx.fillStyle="#f1f3e8";ctx.beginPath();ctx.arc(-5,-27,3,0,7);ctx.arc(5,-27,3,0,7);ctx.fill();
+ ctx.fillStyle="#111";ctx.beginPath();ctx.arc(-5,-27,1.2,0,7);ctx.arc(5,-27,1.2,0,7);ctx.fill();
+ ctx.fillStyle="#101412";ctx.fillRect(10,-3,42,5);
+ ctx.restore();
+ if(player.hit>0){ctx.strokeStyle="rgba(255,60,40,.8)";ctx.lineWidth=3;ctx.beginPath();ctx.arc(player.x,player.y,28,0,7);ctx.stroke()}
+}
+
+function loop(t){const dt=Math.min(.033,(t-last)/1000||0);last=t;update(dt);draw();requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+
+document.getElementById("start").onclick=()=>reset();
+document.getElementById("again").onclick=()=>reset();
+document.getElementById("pauseBtn").onclick=()=>{if(!running)return;paused=true;document.getElementById("pause").style.display="flex"};
+document.getElementById("resume").onclick=()=>{paused=false;document.getElementById("pause").style.display="none"};
+
+document.addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true;if(e.code==="Space")shoot()});
+document.addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+document.querySelectorAll("[data-key]").forEach(btn=>{
+ const k=btn.dataset.key;
+ const on=e=>{e.preventDefault();keys[k]=true};
+ const off=e=>{e.preventDefault();keys[k]=false};
+ btn.addEventListener("touchstart",on,{passive:false});btn.addEventListener("touchend",off,{passive:false});btn.addEventListener("touchcancel",off,{passive:false});
+});
+const fire=document.getElementById("fire");
+fire.addEventListener("touchstart",e=>{e.preventDefault();touchFire=true;shoot()},{passive:false});
+["touchend","touchcancel"].forEach(ev=>fire.addEventListener(ev,e=>{e.preventDefault();touchFire=false},{passive:false}));
+
+// Dotyk na hernej ploche mieri podľa pozície prsta.
+canvas.addEventListener("touchstart",e=>{e.preventDefault();aim(e.touches[0])},{passive:false});
+canvas.addEventListener("touchmove",e=>{e.preventDefault();aim(e.touches[0])},{passive:false});
+function aim(t){if(!player)return;player.angle=Math.atan2(t.clientY-player.y,t.clientX-player.x)}
+</script>
+</body>
+</html>
